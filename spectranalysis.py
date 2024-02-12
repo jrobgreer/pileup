@@ -86,8 +86,8 @@ class Pulse:
 
         # Calculate gradient of gradient
         gradgrad = []
-        
-        for i in range(len(grad)-1):
+           
+        for i in range(len(grad)-1): 
             gradgrad.append(diff_scaling*(grad[i+1]-grad[i])/8)
 
         gradgrad = np.array(gradgrad)
