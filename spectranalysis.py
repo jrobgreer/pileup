@@ -13,6 +13,8 @@ import array
 import gc  
 import pandas as pd
 import time
+from itertools import chain
+
 # COMPASS cannot timestamp events
 # Changed setup to manually timestamp
 
@@ -24,9 +26,18 @@ import time
 class Pulse: 
     
     def __init__(self, pulse_collection, pulse_timestamps, index):
+
         self.record = pulse_collection[index]
-        # Currently a crude timestamp based on the timestamp of the first trigger - need to add timestamping for events within a record - TTT + the offset of the extra pulse
+        # Currently a crude timestamp based on the timestamp of the first trigger - TODO need to add timestamping for events within a record - TTT + the offset of the extra pulse
         self.timestamp = pulse_timestamps[index]
+        print("TIMESTAMP", self.timestamp)
+
+        # True timestamps will contain multiple timestamps from many pulses in a waveform
+        self.true_timestamps = []
+        self.areas = []
+        self.chi2 = []
+        self.ndf = []
+
         self.time = np.linspace(0,1029,1030)
         self.record_length = len(pulse_collection[index])
 
@@ -68,6 +79,69 @@ class Pulse:
         plt.plot(self.record, label='Original')
         #plt.show()
 
+    def get_peaks2(self, plotting=False, min_dist_between_peaks=15, gradient_threshold=12, moving_av_filt=15):
+
+        '''BETTER PEAK FINDING, FINDS THE RISE TIME
+           CAN NOW USE THIS FOR THE FIT RANGE, IT WILL BE FROM THE RISE POSITION TO THE NEXT RISE, HOPEFULLY LESS FIT FAILURE
+           EXTRAPOLATION DISTANCE NEEDS TO BE SEPARATE FROM THIS, AND EXTENDED FURTHER'''
+
+        #plt.plot(self.record)
+        def moving_average(a, n=moving_av_filt):
+            ret = np.cumsum(a, dtype=float)
+            ret[n:] = ret[n:] - ret[:-n]
+            return ret[n - 1:] / n
+        
+    
+        self.record = moving_average(self.record)
+        # #plt.close()
+        # plt.plot(self.record)
+        # plt.plot(self.record, label='Moving average')
+
+        gradient = np.gradient(self.record)
+        self.gradient = gradient
+        
+        plt.plot(gradient, label='gradient')
+        # plt.show()
+        
+        # Locate rise of the pulse from a spike in gradient
+        rise_indices = np.asarray((gradient>gradient_threshold)).nonzero()
+        
+        # Need to select peak from clusters detected around peak, use first
+        prev_rise_index = None
+        rise_indices_clustered = []
+        print(rise_indices)
+        
+        for i, rise_index in enumerate(np.array(rise_indices).flatten()):
+            # print("Rise index:")
+            # print(rise_index)
+            if prev_rise_index == None:
+                print("Starting clustering")
+                prev_rise_index = rise_index
+                rise_indices_clustered.append(rise_index)
+                
+            # Clusters of points flagged as rises, only need one to fit from
+            # Look through the rise indices chosen
+            # If too close together, discard
+            elif rise_index > prev_rise_index + min_dist_between_peaks:
+                #print(rise_index, " compared with ", prev_rise_index)
+                prev_rise_index = rise_index
+                rise_indices_clustered.append(rise_index)
+
+            
+
+        print(rise_indices_clustered)     
+
+
+
+        # plt.scatter(x=rise_indices, y=gradient[rise_indices], s=10, marker='*', color='r', label='Spikes')
+        # plt.scatter(x=rise_indices_clustered, y=gradient[rise_indices_clustered], s=100, marker='+', color='green', label='Rises')
+        # plt.scatter(x=rise_indices_clustered, y=self.record[rise_indices_clustered], s=100, marker='+', color='green', label='Rises')
+        # plt.plot(self.record)
+        # plt.legend()
+        # plt.show()
+
+        self.rise_indices = rise_indices_clustered
+        self.rise_amplitudes = self.record[rise_indices_clustered]
     
     def get_peaks(self, plotting=False, interpolation_length=10000, minimum_distance=10, threshold=500, diff_scaling=10, minimum_time=0):
         '''Differentiate and locate peaks based on gradient, second differential, and minimum distance apart
@@ -166,7 +240,217 @@ class Pulse:
         self.peak_times = peak_times
         self.peak_heights = peak_heights
 
-    
+    def fit2(self, closest_distance=5):
+
+        plt.plot(self.record)
+        plt.scatter(self.rise_indices, self.record[self.rise_indices], marker='+', s=100, label='Rise')
+        plt.legend()
+        plt.show()
+        plt.close()
+        # For pileup waveforms, check distance between rises
+        # If too small, separation tricky, skip over
+        if len(self.rise_indices)>1:
+            
+            gaps_between_pulses = np.diff(self.rise_indices)
+
+            if np.max(gaps_between_pulses - closest_distance)<0:
+                print("Pulses too close, skipping to next pulse")
+                #plt.close()
+                # plt.plot(self.record)
+                # plt.scatter(self.rise_indices, self.record[self.rise_indices])
+                # plt.show()
+                #plt.close()
+                input("press to cont")
+                self.rise_indices = np.ones(1000)
+
+
+            # plt.close()
+            # plt.plot(self.record)
+            # plt.scatter(self.rise_indices, self.record[self.rise_indices])
+            # plt.show()
+        
+        # Set to greater than zero, was 1, was testing not fitting single pulses, but need to consistently fit I think 
+        elif len(self.rise_indices)<10:
+
+            
+            # plt.close()
+            # #plt.scatter(x=self.rise_indices, y=self.gradient[self.rise_indices], s=10, marker='*', color='r', label='Spikes')
+            # #plt.scatter(x=self.rise_indices, y=self.gradient[self.rise_indices], s=100, marker='+', color='green', label='Rises')
+            # plt.scatter(x=self.rise_indices, y=self.record[self.rise_indices], s=100, marker='+', color='green', label='Rises')
+            # plt.plot(self.record, label='Pulse')
+            # plt.legend()
+            # plt.show()
+
+            def guo_fit(x,par):
+                '''par[0] - A
+                   par[1] - t0
+                   par[2] - theta1
+                   par[3] - theta2'''
+                return par[0]*(np.exp(-(x[0]-par[1])/par[2]) - np.exp(-(x[0]-par[1])/par[3]))
+            
+            # Go through all the rise points, and fit between that and the next rise
+            for idx, rise_idx in enumerate(self.rise_indices):
+                print(rise_idx)
+                print(self.record[rise_idx])
+                # plt.close()
+                # plt.plot(self.record[rise_idx:])
+                # plt.show()
+                graph = ROOT.TGraph(len(self.record[rise_idx:]), np.linspace(rise_idx, len(self.record), len(self.record)-rise_idx), self.record[rise_idx:])
+
+
+                #print("End point")
+                #print(self.rise_indices[idx+1])
+
+                # TODO add check for validity of 
+                try:
+                    fit_function = ROOT.TF1('guo_fit', guo_fit, rise_idx, self.rise_indices[idx+1], 4)
+
+                    # These guesses seem to work well
+                    fit_function.SetParameters(1.5*self.rise_amplitudes[idx], self.rise_indices[idx], 50, 20)
+
+                    # Param constraints - needs work
+
+                    # fit_function.SetParLimits(0, 500, 3*self.rise_amplitudes[idx])
+                    # fit_function.SetParLimits(1, self.rise_indices[idx]-5, self.rise_indices[idx]+5)
+                    # fit_function.SetParLimits(2, 10, 100)
+                    # fit_function.SetParLimits(3, 1, 30)
+
+
+                    fit_result = graph.Fit(fit_function, "RSME")
+
+                    
+                    canvas = ROOT.TCanvas("canvas", "Guo Fit", 800, 600)
+                    graph.Draw("AP")
+                    fit_function.Draw("same")
+                    canvas.Update()
+                    canvas.Draw()
+                    if fit_result.IsValid() == False:
+                        
+                        #print(self.rise_indices)
+                        print("Fit failed, moving to next pulse")
+                        input("Waiting")
+
+                        break
+
+                    
+                    #TODO Make this line less bad
+                    fitted_pulse = np.array([guo_fit([t], [fit_function.GetParameter(i) for i in range(fit_function.GetNpar())]) for t in np.linspace(rise_idx, len(self.record), len(self.record[rise_idx:]))])
+                    
+                    # Get the timestamp, will be relative to the timestamp of the event at trigger point (first peak rise)
+                    self.true_timestamps.append(self.timestamp + (rise_idx - self.rise_indices[0])*8)
+                    self.areas.append(np.sum(fitted_pulse))
+                    self.chi2.append(fit_function.GetChisquare())
+                    self.ndf.append(fit_function.GetNDF())
+
+                    print("TT:", self.true_timestamps)
+                    print("AREAS: ", self.areas)
+                    print("CHI2:", self.chi2)
+                    print("NDF:", self.ndf)
+                    # NOTE Plotting for fit checks
+                    #plt.close()
+                    # plt.plot(fitted_pulse)
+                    # plt.plot(self.record[rise_idx:] - fitted_pulse)
+                    # plt.show()
+                    # plt.close()
+                    # if fit_result.IsValid() == False:
+                    #     input("Waiting")
+         
+
+                except IndexError:
+                    fit_function = ROOT.TF1('guo_fit', guo_fit, rise_idx, len(self.record), 4)
+
+                    # These guesses arbitrarily work well
+                    fit_function.SetParameters(2*self.rise_amplitudes[idx], self.rise_indices[idx], 50, 20)
+
+                    fit_result = graph.Fit(fit_function, "RS")
+
+                    canvas = ROOT.TCanvas("canvas", "Guo Fit", 800, 600)
+                    graph.Draw("AP")
+                    fit_function.Draw("same")
+                    canvas.Update()
+                    canvas.Draw()
+
+                    if fit_result.IsValid() == False:
+                        #print(self.rise_indices)
+                        print("Fit failed, moving to next pulse")
+                        input("Waiting")
+                        break
+
+                    # TODO this is overly simplified, use CHI2 and Ndf to determine quality of fit, save all, and then can filter
+                    # in post plotting
+
+                    #TODO Make this line less bad
+                    fitted_pulse = np.array([guo_fit([t], [fit_function.GetParameter(i) for i in range(fit_function.GetNpar())]) for t in np.linspace(rise_idx, len(self.record), len(self.record[rise_idx:]))])
+                    
+                    # Get the timestamp, will be relative to the timestamp of the event at trigger point (first peak rise)
+                    self.true_timestamps.append(self.timestamp + (rise_idx - self.rise_indices[0])*8)
+                    self.areas.append(np.sum(fitted_pulse))
+                    print("TT:", self.true_timestamps)
+                    print("AREAS: ", self.areas)
+                    self.chi2.append(fit_function.GetChisquare())
+                    self.ndf.append(fit_function.GetNDF())
+                    print("CHI2:", self.chi2)
+                    print("NDF:", self.ndf)
+                    # This is an extracted pulse, so get the information
+                    # areas.append(np.sum(fitted_pulse))
+                    # timestamps.append(rise_idx*)
+                    
+                    #NOTE Plotting for fit checks
+                    #plt.close()
+                    # plt.plot(fitted_pulse, label='Fit')
+                    # plt.plot(self.record[rise_idx:] - fitted_pulse, label='Subtracted')
+                    # plt.legend()
+                    # plt.show()
+                    # plt.close()
+           
+                    # plt.close()
+               
+                #input("Continue...")
+
+
+                del fitted_pulse
+                del fit_function
+                del graph
+                del canvas
+        else:
+            self.true_timestamps.append(self.timestamp)
+            self.areas.append(np.sum(self.record[self.rise_indices[0]:]))
+            print("TT:", self.true_timestamps)
+            print("AREAS: ", self.areas)
+            self.chi2.append(0)
+            self.ndf.append(0)
+            print("CHI2:", self.chi2)
+            print("NDF:", self.ndf)
+            
+            
+
+
+            # Create a TF1 object for the fit function
+            #fit_function = ROOT.TF1("landau", 'landau', self.peak_times[0]-prefit_window, self.peak_times[0]+postfit_window)
+            # fit_function = ROOT.TF1('guo_fit', guo_fit, self.peak_times[0]-prefit_window, self.peak_times[0]+postfit_window, 4)
+            # fit_function.SetParameters(2*self.peak_heights[0], self.peak_times[0], 50, 20)
+
+            # #Perform the fit
+            # fit_result = graph.Fit(fit_function, "RS")
+            # print(fit_result.IsValid())
+            # if fit_result.IsValid() ==False:
+            #     print("FIT FAILURE")
+
+            #     canvas = ROOT.TCanvas("canvas", "Guo Fit", 800, 600)
+            #     graph.Draw("AP")
+                
+            #     fit_function.Draw("same")
+
+            #     canvas.Update()
+            #     canvas.Draw()
+                
+            #     # check if at end of pulse and fitting not possible in some way, if this is the case,
+            #     # probably not necessary to throw away whole pulse
+
+            #     input("Press Enter to close the canvas...")
+            # else:
+            #     print("FIT SUCCESSFUL")
+
     def fit(self, prefit_window=200, postfit_window=500):
 
         if len(self.peak_times) >= 1:
@@ -176,9 +460,7 @@ class Pulse:
             x_array = self.time[self.time>self.peak_times[0]-prefit_window]
             y_array = self.record[self.time>self.peak_times[0]-prefit_window]
 
-            # plt.close()
-            # plt.plot(x_array, y_array)
-            # plt.show()
+
 
             # Create a TGraph object
             graph = ROOT.TGraph(len(self.time[self.time>self.peak_times[0]-prefit_window]), x_array, y_array)
@@ -221,24 +503,26 @@ class Pulse:
             #fitted_pulse = np.array([fit_function.GetParameter(0) * ROOT.TMath.Landau(t, fit_function.GetParameter(1), fit_function.GetParameter(2)) for t in self.time[self.time>self.peak_times[0]-prefit_window]])
             fitted_pulse = np.array([guo_fit([t], [fit_function.GetParameter(i) for i in range(fit_function.GetNpar())]) for t in self.time[self.time>self.peak_times[0]-prefit_window]])
 
+            # Added cut for above 0
+            # area = np.sum(fitted_pulse[fitted_pulse>0])
             area = np.sum(fitted_pulse)
-            self.area= area
+            self.area = area
 
             # EDIT THIS TO CORRECT THE TIMESTAMP
             self.timestamp = self.timestamp
             print("AREA: ", area)
 
-            # plt.close()
-            # plt.plot(self.time, self.record, label='Original full pulse')
-            # self.record[self.time>self.peak_times[0]-prefit_window] = self.record[self.time>self.peak_times[0]-prefit_window] - fitted_pulse
-            # plt.plot(self.time[self.time>self.peak_times[0]], self.record[self.time>self.peak_times[0]], label='Original pulse - fit region', linestyle='-')
-            # plt.plot(self.time[self.time>self.peak_times[0]-prefit_window], fitted_pulse, label='Fit pulse')
-            # plt.plot(self.time, self.record, label='Subtracted fit pulse')
+            plt.close()
+            plt.plot(self.time, self.record, label='Original full pulse')
+            self.record[self.time>self.peak_times[0]-prefit_window] = self.record[self.time>self.peak_times[0]-prefit_window] - fitted_pulse
+            plt.plot(self.time[self.time>self.peak_times[0]], self.record[self.time>self.peak_times[0]], label='Original pulse - fit region', linestyle='-')
+            plt.plot(self.time[self.time>self.peak_times[0]-prefit_window], fitted_pulse, label='Fit pulse')
+            plt.plot(self.time, self.record, label='Subtracted fit pulse')
 
-            # plt.legend()
-            # plt.show()
+            plt.legend()
+            plt.show()
 
-            # plt.close()
+            plt.close()
 
             # Arbitrary offset of 50 now before another peak is allowed
             try:
@@ -274,81 +558,4 @@ class Pulse:
 
     
 
-
-
-pulse_collection, pulse_timestamps = gw.get_pulse_collection('testdataGENERATOR.dat')
-
-
-areas = []
-timestamps = []
-print("EXPECT ", int(len(pulse_collection)), " PULSES")
-input("Press to ocntinue")
-
-for pulse_idx in range(int(0.03*len(pulse_collection))):
-
-    
-    st = time.time()
-
-    print("_______________________________________________________________________________")
-    print(" PULSE INDEX ", pulse_idx)
-    print("_______________________________________________________________________________")
-    pulse = Pulse(pulse_collection, pulse_timestamps, pulse_idx)
-    #pulse.plot()
-    
-    pulse.butter_lowpass_filtfilt(cutoff=22e6, fs=250e6, plotting=False) #25e6 was
-    
-    # Get the first load of peaks
-    try:
-        pulse.get_peaks(plotting=False, threshold=500)
-    except:
-        pulse.peak_heights = []
-        pulse.peak_times = []
-        print("No peaks found")
-        
-    
-    # As long as there is a peak to be fit to, fit 
-    while len(pulse.peak_heights) >=1:
-        print("Peaks avaiable: ", len(pulse.peak_heights))
-        pulse.fit(prefit_window=10, postfit_window=100)
-        areas.append(pulse.area)
-        timestamps.append(pulse.timestamp)
-
-    
-    end = time.time()
-    elapsed = end - st
-
-    time_rem = (int(0.02*len(pulse_collection)) - pulse_idx) * elapsed / 60
-
-    print("Estimated time remaining : ", time_rem, " mins")
-    #input("Look look look")
-
-
-
-df = pd.DataFrame({'Area': areas, 'Timestamp': timestamps})
-# Save to CSV file
-csv_filename = 'pileupcorrection.csv'
-df.to_csv(csv_filename, index=False)
-
-plt.close()
-plt.hist(areas, bins=1000)
-plt.show()
-    
-
-    # for idx, ph in enumerate(pulse.peak_heights):
-    #     pulse.fit(prefit_window=10, postfit_window=100)
-    #     if len(pulse.peak_heights)==0:
-    #         break
-    #     ##pulse.butter_lowpass_filtfilt(cutoff=1e6, fs=250e6, plotting=True)
-    #     else:
-    #         pulse.get_peaks(plotting=True, threshold=200)
-    
-    # plt.grid()
-    # plt.minorticks_on()
-    # plt.legend()
-    # plt.show()
-
-
-
-# Code needs to fit to tails of preamp pulses and deconvolve pileup 
-# Should be able to timestamp events within a record
 
