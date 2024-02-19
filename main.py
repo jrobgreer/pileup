@@ -1,6 +1,7 @@
 import spectranalysis as sp
 import getwave as gw
 from itertools import chain
+import numpy as np
 import pandas as pd
 
 pulse_collection, pulse_timestamps = gw.get_pulse_collection('soilfromoutside150224_15mins_GENON.dat', baseline=0.1)
@@ -23,7 +24,7 @@ for pulse_idx in range(int(len(pulse_collection))):
 
     #pulse.butter_lowpass_filtfilt(cutoff=15e6, fs=250e6, plotting=False) #25e6 was
     pulse.get_peaks2(min_dist_between_peaks=20, gradient_threshold=10)
-    pulse.fit2()
+    pulse.fit2(closest_distance=8)
 
     areas.append(pulse.areas)
     timestamps.append(pulse.true_timestamps)
@@ -68,6 +69,7 @@ print(flat_areas)
 # plt.hist(np.array(flat_timestamps), bins=1000)
 # plt.xlabel("Timestamps")
 # plt.show()
+
 
 # plt.close()
 # plt.hist(np.array(flat_areas), bins=1000)

@@ -14,7 +14,9 @@ def get_pulse_collection(file, baseline, digitizer_family = gdw.DigitizerFamily.
     pulse_timestamps = np.empty(parser.n_entries)
     print(pulse_collection)
     for i in range(parser.n_entries):
+
         event = parser.get_event(i)
+
         pulse_collection[i] = -1*(baseline*16384 + event.record - 16384)
         # plt.plot(pulse_collection[i])
         # #plt.ylim(17000, 0)
