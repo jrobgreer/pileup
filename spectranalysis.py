@@ -100,13 +100,6 @@ class Pulse:
         # NOTE Add argument for threshold here, needs to be tuned to same as the digitiser settings probably
         # Remove weird shoulder on event start, hardware issue, possibly noise/impedance problem
 
-        # First time gradient goes negative , find the max between the start and that point
-        # Will find the first PEAK
-        first_neg_grad = np.argmax(self.gradient < 0)
-        threshold_idx = np.argmax(
-            self.record > np.max(self.record[:first_neg_grad]))
-        self.record[:threshold_idx] = 0
-
         def moving_average(a, n=moving_av_filt):
             ret = np.cumsum(a, dtype=float)
             ret[n:] = ret[n:] - ret[:-n]
@@ -115,6 +108,13 @@ class Pulse:
         self.record = moving_average(self.record)
 
         self.gradient = np.gradient(self.record)
+
+        # First time gradient goes negative , find the max between the start and that point
+        # Will find the first PEAK
+        first_neg_grad = np.argmax(self.gradient < 0)
+        threshold_idx = np.argmax(
+            self.record > np.max(self.record[:first_neg_grad]))
+        self.record[:threshold_idx] = 0
 
         plt.plot(self.gradient, label='gradient')
         # plt.show()
