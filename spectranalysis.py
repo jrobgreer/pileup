@@ -28,7 +28,8 @@ class Pulse:
 
     def __init__(self, pulse_collection, pulse_timestamps, index):
 
-        self.record = pulse_collection[index]
+        self.record = np.zeros(2000)
+        self.record[0:len(pulse_collection[index])] = pulse_collection[index]
         # Currently a crude timestamp based on the timestamp of the first trigger - TODO need to add timestamping for events within a record - TTT + the offset of the extra pulse
         self.timestamp = pulse_timestamps[index]
         self.event_id = index
@@ -98,7 +99,12 @@ class Pulse:
 
         # NOTE Add argument for threshold here, needs to be tuned to same as the digitiser settings probably
         # Remove weird shoulder on event start, hardware issue, possibly noise/impedance problem
-        threshold_idx = np.argmax(self.record > 1100)
+
+        # First time gradient goes negative , find the max between the start and that point
+        # Will find the first PEAK
+        first_neg_grad = np.argmax(self.gradient < 0)
+        threshold_idx = np.argmax(
+            self.record > np.max(self.record[:first_neg_grad]))
         self.record[:threshold_idx] = 0
 
         def moving_average(a, n=moving_av_filt):
@@ -310,7 +316,8 @@ class Pulse:
                     1.5*np.max(self.record[rise_idx:fit_end]), self.rise_indices[idx], 50, 10)
 
                 fit_function.FixParameter(1, rise_idx)
-                # fit_function.SetParLimits(0, self.rise_amplitudes[idx]-1000, 2*self.rise_amplitudes[idx])
+                fit_function.SetParLimits(0, np.max(
+                    0.8*self.record[rise_idx:fit_end]), 2*np.max(self.record[rise_idx:fit_end]))
                 fit_function.SetParLimits(2, 2, 300)
                 fit_function.SetParLimits(3, 2, 20)
 
