@@ -21,7 +21,7 @@ par2 = []
 par3 = []
 eventid = []
 time_to_fit = []
-
+fit_results = []
 
 print("EXPECT ", int(0.005*len(pulse_collection)), " PULSES")
 input("Press to continue")
@@ -50,6 +50,7 @@ for pulse_idx in range(int(0.005*len(pulse_collection))):
     par3.append(pulse.par3)
     eventid.append(pulse.record_id)
     time_to_fit.append(pulse.time_to_fit)
+    fit_results.append(pulse.fitresultstatus)
 
 
 flat_timestamps = list(chain.from_iterable(timestamps))
@@ -64,12 +65,13 @@ flat_par2 = list(chain.from_iterable(par2))
 flat_par3 = list(chain.from_iterable(par3))
 flat_eventid = list(chain.from_iterable(eventid))
 flat_time_to_fit = list(chain.from_iterable(time_to_fit))
+flat_fit_results = list(chain.from_iterable(fit_results))
 
 df = pd.DataFrame({'Area': np.array(flat_areas), 'Timestamp': np.array(
     flat_timestamps), 'Chi2': np.array(flat_chi2), 'NDF': np.array(flat_ndf),
     'Pulse Count': np.array(flat_pulse_counts), 'Rem Pulse Area': np.array(flat_remaining_pulse_areas),
     'Par0': np.array(flat_par0), 'Par1': np.array(flat_par1), 'Par2': np.array(flat_par2),
-    'Par3': np.array(flat_par3), 'EventID': np.array(flat_eventid), 'Time to fit': np.array(flat_time_to_fit)})
+    'Par3': np.array(flat_par3), 'EventID': np.array(flat_eventid), 'Time to fit': np.array(flat_time_to_fit), 'FitResult': np.array(flat_fit_results)})
 # Save to CSV file
 csv_filename = 'IthinkHydrogen_EXTRADATA.csv'
 df.to_csv(csv_filename, index=False)

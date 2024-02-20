@@ -15,6 +15,7 @@ import pandas as pd
 import time
 from itertools import chain
 
+plt.rcParams['figure.figsize'] = (20, 4)
 # COMPASS cannot timestamp events
 # Changed setup to manually timestamp
 
@@ -28,6 +29,8 @@ class Pulse:
 
     def __init__(self, pulse_collection, pulse_timestamps, index):
 
+        # Now we've expanded the record length, REMAINING PULSE AREA after subtraction is no longer
+        # a good measure of fit quality for the final pulse, there will always be an undershoot
         self.record = np.zeros(2000)
         self.record[0:len(pulse_collection[index])] = pulse_collection[index]
         # Currently a crude timestamp based on the timestamp of the first trigger - TODO need to add timestamping for events within a record - TTT + the offset of the extra pulse
@@ -47,6 +50,7 @@ class Pulse:
         self.pulse_count = []
         self.remaining_pulse_area = []
         self.time_to_fit = []
+        self.fitresultstatus = []
 
         # NOTE may be worth getting rid of these
         self.time = np.linspace(0, 1029, 1030)
@@ -109,16 +113,20 @@ class Pulse:
 
         self.gradient = np.gradient(self.record)
 
-        # First time gradient goes negative , find the max between the start and that point
-        # Will find the first PEAK
-        first_neg_grad = np.argmax(self.gradient < 0)
+        # Need to remove strange shoulders on first pulse
+        # To do this, set anything before the first peak to 0, for a sharp rise
+        first_neg_grad = np.argmax(self.gradient < -8)
+        print(first_neg_grad)
         threshold_idx = np.argmax(
             self.record > np.max(self.record[:first_neg_grad]))
+        print(threshold_idx)
         self.record[:threshold_idx] = 0
 
         plt.plot(self.gradient, label='gradient')
         # plt.show()
 
+        # Recalculate gradient before finding rises
+        self.gradient = np.gradient(self.record)
         # Locate rise of the pulse from a spike in gradient
         rise_indices = np.asarray(
             (self.gradient > gradient_threshold)).nonzero()
@@ -318,12 +326,14 @@ class Pulse:
                 fit_function.FixParameter(1, rise_idx)
                 fit_function.SetParLimits(0, np.max(
                     0.8*self.record[rise_idx:fit_end]), 2*np.max(self.record[rise_idx:fit_end]))
-                fit_function.SetParLimits(2, 2, 300)
+                fit_function.SetParLimits(2, 20, 300)
                 fit_function.SetParLimits(3, 2, 20)
 
                 start_time = time.time()
 
-                fit_result = graph.Fit(fit_function, "QRS")
+                fit_result = graph.Fit(fit_function, "RS")
+
+                self.fitresultstatus.append(fit_result.Status())
 
                 end_time = time.time()
                 fit_time = end_time - start_time
