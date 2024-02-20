@@ -45,6 +45,7 @@ class Pulse:
         self.record_id = []
         self.pulse_count = []
         self.remaining_pulse_area = []
+        self.time_to_fit = []
 
         # NOTE may be worth getting rid of these
         self.time = np.linspace(0, 1029, 1030)
@@ -109,7 +110,7 @@ class Pulse:
 
         self.gradient = np.gradient(self.record)
 
-        # plt.plot(self.gradient, label='gradient')
+        plt.plot(self.gradient, label='gradient')
         # plt.show()
 
         # Locate rise of the pulse from a spike in gradient
@@ -125,7 +126,7 @@ class Pulse:
             # print("Rise index:")
             # print(rise_index)
             if prev_rise_index == None:
-                print("Starting clustering")
+                # print("Starting clustering")
                 prev_rise_index = rise_index
                 rise_indices_clustered.append(rise_index)
 
@@ -138,7 +139,6 @@ class Pulse:
                 rise_indices_clustered.append(rise_index)
 
         # print(rise_indices_clustered)
-
         # plt.scatter(x=rise_indices, y=gradient[rise_indices], s=10, marker='*', color='r', label='Spikes')
         # plt.scatter(x=rise_indices_clustered, y=gradient[rise_indices_clustered], s=100, marker='+', color='green', label='Rises')
         # plt.scatter(x=rise_indices_clustered, y=self.record[rise_indices_clustered], s=100, marker='+', color='green', label='Rises')
@@ -252,19 +252,18 @@ class Pulse:
 
     def fit2(self, closest_distance=20):
 
-        # plt.plot(self.record, label='Remove shoulder + mov avg')
+        plt.plot(self.record, label='Remove shoulder + mov avg')
 
-        # plt.scatter(self.rise_indices,
-        #             self.record[self.rise_indices], marker='+', s=100, label='Rise')
-        # plt.legend()
-        # plt.show()
-        # plt.close()
+        plt.scatter(self.rise_indices,
+                    self.record[self.rise_indices], marker='+', s=100, label='Rise')
+        plt.legend()
+        plt.show()
+        plt.close()
 
         # For pileup waveforms, check distance between rises
         # If too small, separation tricky, skip over
         pulse_suitable = True
         gaps_between_pulses = np.diff(self.rise_indices)
-        print(gaps_between_pulses)
 
         try:
             if np.min(gaps_between_pulses) < closest_distance:
@@ -273,25 +272,6 @@ class Pulse:
 
         except ValueError:
             print("One pulse waveform, continuing with fit...")
-
-        # if len(self.rise_indices)>1:
-
-        #     gaps_between_pulses = np.diff(self.rise_indices)
-
-        #     if np.min(gaps_between_pulses)<closest_distance:
-        #         print("Pulses too close, skipping to next pulse")
-        #         #plt.close()
-        #         # plt.plot(self.record)
-        #         # plt.scatter(self.rise_indices, self.record[self.rise_indices])
-        #         # plt.show()
-        #         #plt.close()
-        #         input("press to cont")
-        #         self.rise_indices = np.ones(1000)
-
-            # plt.close()
-            # plt.plot(self.record)
-            # plt.scatter(self.rise_indices, self.record[self.rise_indices])
-            # plt.show()
 
         if pulse_suitable == True:
 
@@ -322,11 +302,28 @@ class Pulse:
                 # graph.SetMarkerSize(1)
                 # graph.SetMarkerColor(4)
 
+                # print("AMPLITUDE: ", np.max(self.record[rise_idx:fit_end]))
+                # Only fit up to next rise
                 fit_function = ROOT.TF1(
                     'guo_fit', guo_fit, rise_idx, fit_end, 4)
                 fit_function.SetParameters(
-                    1.5*self.rise_amplitudes[idx], self.rise_indices[idx], 50, 20)
-                fit_result = graph.Fit(fit_function, "RSME")
+                    1.5*np.max(self.record[rise_idx:fit_end]), self.rise_indices[idx], 50, 10)
+
+                fit_function.FixParameter(1, rise_idx)
+                # fit_function.SetParLimits(0, self.rise_amplitudes[idx]-1000, 2*self.rise_amplitudes[idx])
+                fit_function.SetParLimits(2, 2, 300)
+                fit_function.SetParLimits(3, 2, 20)
+
+                start_time = time.time()
+
+                fit_result = graph.Fit(fit_function, "QRS")
+
+                end_time = time.time()
+                fit_time = end_time - start_time
+
+                # print("---------------------------------------------------------------------------")
+                print("Time to fit: ", fit_time)
+                # print("---------------------------------------------------------------------------")
 
                 # canvas = ROOT.TCanvas(
                 #     "canvas", "Guo Model Pulse Fit", 1000, 600)
@@ -334,6 +331,8 @@ class Pulse:
                 # fit_function.Draw("same")
                 # canvas.Update()
                 # canvas.Draw()
+
+                # input("Enter to cont")
 
                 fitted_pulse = np.array([guo_fit([t], [fit_function.GetParameter(i) for i in range(
                     fit_function.GetNpar())]) for t in np.linspace(rise_idx, len(self.record), len(self.record[rise_idx:]))])
@@ -344,8 +343,8 @@ class Pulse:
                 self.remaining_pulse_area.append(corrected_pulse_area)
 
                 # NOTE tune this value
-                if corrected_pulse_area < -1000:
-                    print("Bad fit, remaining pulse mangled")
+                # if corrected_pulse_area < -1000:
+                #     print("Bad fit, remaining pulse mangled")
 
                 # Get the timestamp, will be relative to the timestamp of the event at trigger point (first peak rise)
                 self.true_timestamps.append(
@@ -364,26 +363,28 @@ class Pulse:
 
                 self.record_id.append(self.event_id)
 
+                self.time_to_fit.append(fit_time)
+
                 # Correct wfm
                 self.record[rise_idx:] = self.record[rise_idx:] - fitted_pulse
 
-                print("Parent waveform: ", self.event_id)
-                print("Pulses in record: ", len(self.rise_indices))
-                print("Timestamps: ", self.true_timestamps)
+                # print("Parent waveform: ", self.event_id)
+                # print("Pulses in record: ", len(self.rise_indices))
+                # print("Timestamps: ", self.true_timestamps)
 
-                # plt.close()
+                plt.close()
 
-                # plt.plot(fitted_pulse, label='Fitted pulse')
-                # plt.plot(self.record[rise_idx:],
-                #          label='Waveform minus Fitted Pulse')
+                plt.plot(fitted_pulse, label='Fitted pulse')
+                plt.plot(self.record[rise_idx:],
+                         label='Waveform minus Fitted Pulse')
 
-                # plt.legend()
-                # plt.show()
+                plt.legend()
+                plt.show()
 
                 del fitted_pulse
                 del fit_function
                 del graph
-                del canvas
+                # del canvas
 
             # idx is position in rise_indices, rise_idx is actual index of rise within the waveform self.record
             for idx, rise_idx in enumerate(self.rise_indices):
