@@ -22,11 +22,13 @@ par3 = []
 eventid = []
 time_to_fit = []
 fit_results = []
+rise_point = []
+raw_integrals = []
 
-print("EXPECT ", int(0.005*len(pulse_collection)), " PULSES")
+print("EXPECT ", int(0.035*len(pulse_collection)), " PULSES")
 input("Press to continue")
 
-for pulse_idx in range(int(0.005*len(pulse_collection))):
+for pulse_idx in range(int(0.035*len(pulse_collection))):
 
     print("-------------------------------------------------------------------------------")
     print("-------------------- PULSE INDEX ",
@@ -35,8 +37,9 @@ for pulse_idx in range(int(0.005*len(pulse_collection))):
     pulse = sp.Pulse(pulse_collection, pulse_timestamps, pulse_idx)
 
     # pulse.butter_lowpass_filtfilt(cutoff=15e6, fs=250e6, plotting=False) #25e6 was
-    pulse.get_peaks2(min_dist_between_peaks=20, gradient_threshold=10)
-    pulse.fit2(closest_distance=8)
+    # pulse.raw_int()
+    pulse.get_peaks2(min_dist_between_peaks=20, gradient_threshold=16)
+    pulse.fit2(closest_distance=21, fit_options='QRS')
 
     areas.append(pulse.areas)
     timestamps.append(pulse.true_timestamps)
@@ -51,6 +54,8 @@ for pulse_idx in range(int(0.005*len(pulse_collection))):
     eventid.append(pulse.record_id)
     time_to_fit.append(pulse.time_to_fit)
     fit_results.append(pulse.fitresultstatus)
+    rise_point.append(pulse.rise_point)
+    # raw_integrals.append(pulse.raw_integral)
 
 
 flat_timestamps = list(chain.from_iterable(timestamps))
@@ -66,14 +71,17 @@ flat_par3 = list(chain.from_iterable(par3))
 flat_eventid = list(chain.from_iterable(eventid))
 flat_time_to_fit = list(chain.from_iterable(time_to_fit))
 flat_fit_results = list(chain.from_iterable(fit_results))
+flat_rise_point = list(chain.from_iterable(rise_point))
+# flat_raw_integrals = list(chain.from_iterable(raw_integrals))
 
 df = pd.DataFrame({'Area': np.array(flat_areas), 'Timestamp': np.array(
     flat_timestamps), 'Chi2': np.array(flat_chi2), 'NDF': np.array(flat_ndf),
     'Pulse Count': np.array(flat_pulse_counts), 'Rem Pulse Area': np.array(flat_remaining_pulse_areas),
     'Par0': np.array(flat_par0), 'Par1': np.array(flat_par1), 'Par2': np.array(flat_par2),
-    'Par3': np.array(flat_par3), 'EventID': np.array(flat_eventid), 'Time to fit': np.array(flat_time_to_fit), 'FitResult': np.array(flat_fit_results)})
+    'Par3': np.array(flat_par3), 'EventID': np.array(flat_eventid), 'Time to fit': np.array(flat_time_to_fit), 'FitResult': np.array(flat_fit_results),
+    'RisePoint': np.array(flat_rise_point)})  # , 'RawInt': np.array(flat_raw_integrals)})
 # Save to CSV file
-csv_filename = 'IthinkHydrogen_EXTRADATA.csv'
+csv_filename = 'Calib_long.csv'
 df.to_csv(csv_filename, index=False)
 
 

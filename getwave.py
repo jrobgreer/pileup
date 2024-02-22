@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # file = 'testdataGENERATOR.dat'
+# perc_of_events
 
 
 def get_pulse_collection(file, baseline, digitizer_family=gdw.DigitizerFamily.X725):

@@ -37,6 +37,9 @@ class Pulse:
         self.timestamp = pulse_timestamps[index]
         self.event_id = index
 
+        # Flag for throwing away bad pulses
+        self.pulse_suitable = True
+
         # True timestamps will contain multiple timestamps from many pulses in a waveform
         self.true_timestamps = []
         self.areas = []
@@ -51,6 +54,8 @@ class Pulse:
         self.remaining_pulse_area = []
         self.time_to_fit = []
         self.fitresultstatus = []
+        self.rise_point = []
+        self.raw_integral = []
 
         # NOTE may be worth getting rid of these
         self.time = np.linspace(0, 1029, 1030)
@@ -94,15 +99,27 @@ class Pulse:
         plt.plot(self.record, label='Original')
         # plt.show()
 
-    def get_peaks2(self, plotting=False, min_dist_between_peaks=15, gradient_threshold=12, moving_av_filt=10):
-        '''Called get peaks but it actually gets the rises... BETTER RISE FINDING, FINDS THE RISE TIME
-           CAN NOW USE THIS FOR THE FIT RANGE, IT WILL BE FROM THE RISE POSITION TO THE NEXT RISE, HOPEFULLY LESS FIT FAILURE
-           EXTRAPOLATION DISTANCE NEEDS TO BE SEPARATE FROM THIS, AND EXTENDED FURTHER'''
+    def raw_int(self):
+        integral = np.sum(self.record[self.rise_indices[0]:])
+        # print("Raw integral : ", integral)
+        self.rawint = integral
+        self.raw_integral.append(integral)
 
-        # plt.plot(self.record, label='Original wfm')
+    def get_peaks2(self, plotting=False, min_dist_between_peaks=15, gradient_threshold=25, moving_av_filt=8):
+        '''Find the rise points based upon gradient, for use as fit limits in fit2
+           min_dist_between_peaks - allows removal of peaks too closely spaced for fitting
+           gradient_threshold - what gradient defines a rise
+           moving_av_filt - spacing for moving avg filtering'''
 
-        # NOTE Add argument for threshold here, needs to be tuned to same as the digitiser settings probably
-        # Remove weird shoulder on event start, hardware issue, possibly noise/impedance problem
+        # Check for encroaching pulses from previous record
+        if np.median(self.record[:10]) > 500:
+            self.pulse_suitable = False
+            print("Encroaching previous pulse, skip to next...")
+            return
+
+        plt.close()
+        plt.plot(self.record, label='Original wfm')
+        # plt.show()
 
         def moving_average(a, n=moving_av_filt):
             ret = np.cumsum(a, dtype=float)
@@ -113,17 +130,33 @@ class Pulse:
 
         self.gradient = np.gradient(self.record)
 
-        # Need to remove strange shoulders on first pulse
+        # Remove strange noise shoulders on first pulse - need to find source of these, if noise, ok, but
+        # what if these are real pulses tangled up in the rise of the bigger pulse?
         # To do this, set anything before the first peak to 0, for a sharp rise
-        first_neg_grad = np.argmax(self.gradient < -8)
-        print(first_neg_grad)
-        threshold_idx = np.argmax(
-            self.record > np.max(self.record[:first_neg_grad]))
-        print(threshold_idx)
-        self.record[:threshold_idx] = 0
+        try:
+            first_neg_grad = np.argmax(self.gradient < -20)
+            print(first_neg_grad)
+            threshold_idx = np.argmax(self.record[:first_neg_grad])
+            print(threshold_idx)
+            self.record[:threshold_idx] = 0
+            plt.plot(self.record, label='Shoulder removed')
+            plt.legend()
+            plt.show()
+            # self.record[:first_neg_grad] = 0
 
-        plt.plot(self.gradient, label='gradient')
-        # plt.show()
+        except ValueError:
+            print("Gradient never less than -20 ")
+            print("First pulse shoulder not corrected")
+            # plt.plot(self.record, label='Edited')
+            # plt.axvline(first_neg_grad)
+            # plt.plot(self.gradient, label='gradient')
+            # plt.legend()
+            # plt.show()
+            # self.pulse_suitable = False
+
+        # plt.plot(self.record, label='Edited')
+        # plt.axvline(first_neg_grad)
+        # plt.plot(self.gradient, label='gradient')
 
         # Recalculate gradient before finding rises
         self.gradient = np.gradient(self.record)
@@ -162,6 +195,10 @@ class Pulse:
 
         self.rise_indices = rise_indices_clustered
         self.rise_amplitudes = self.record[rise_indices_clustered]
+
+        # plt.scatter(self.rise_indices, self.rise_amplitudes)
+        # plt.legend()
+        # plt.show()
 
     def get_peaks(self, plotting=False, interpolation_length=10000, minimum_distance=10, threshold=500, diff_scaling=10, minimum_time=0):
         '''Differentiate and locate peaks based on gradient, second differential, and minimum distance apart
@@ -264,30 +301,38 @@ class Pulse:
         self.peak_times = peak_times
         self.peak_heights = peak_heights
 
-    def fit2(self, closest_distance=20):
+    def fit2(self, closest_distance=25, fit_options='QRS'):
 
-        plt.plot(self.record, label='Remove shoulder + mov avg')
+        # plt.plot(self.record, label='Remove shoulder + mov avg')
 
-        plt.scatter(self.rise_indices,
-                    self.record[self.rise_indices], marker='+', s=100, label='Rise')
-        plt.legend()
-        plt.show()
-        plt.close()
+        # plt.scatter(self.rise_indices,
+        #             self.record[self.rise_indices], marker='+', s=100, label='Rise')
+        # plt.legend()
+        # plt.show()
+        # plt.close()
 
         # For pileup waveforms, check distance between rises
         # If too small, separation tricky, skip over
-        pulse_suitable = True
-        gaps_between_pulses = np.diff(self.rise_indices)
+        try:
+            gaps_between_pulses = np.diff(self.rise_indices)
+            print(gaps_between_pulses)
+        except AttributeError:
+            print("Bad pulse, do not fit, move to next...")
 
         try:
+            print(np.min(gaps_between_pulses))
+            print(closest_distance)
             if np.min(gaps_between_pulses) < closest_distance:
                 print("Pulses too close, skipping to next pulse")
-                pulse_suitable = False
+                self.pulse_suitable = False
 
         except ValueError:
             print("One pulse waveform, continuing with fit...")
 
-        if pulse_suitable == True:
+        except UnboundLocalError:
+            print("Diffs not calculated")
+
+        if self.pulse_suitable == True:
 
             # plt.close()
             # # plt.scatter(x=self.rise_indices, y=self.gradient[self.rise_indices], s=10, marker='*', color='r', label='Spikes')
@@ -325,13 +370,14 @@ class Pulse:
 
                 fit_function.FixParameter(1, rise_idx)
                 fit_function.SetParLimits(0, np.max(
-                    0.8*self.record[rise_idx:fit_end]), 2*np.max(self.record[rise_idx:fit_end]))
+                    1*self.record[rise_idx:fit_end]), 2*np.max(self.record[rise_idx:fit_end]))
+                # fit_function.SetParLimits(1, rise_idx-2, rise_idx+2)
                 fit_function.SetParLimits(2, 20, 300)
                 fit_function.SetParLimits(3, 2, 20)
 
                 start_time = time.time()
 
-                fit_result = graph.Fit(fit_function, "RS")
+                fit_result = graph.Fit(fit_function, fit_options)
 
                 self.fitresultstatus.append(fit_result.Status())
 
@@ -340,6 +386,7 @@ class Pulse:
 
                 # print("---------------------------------------------------------------------------")
                 print("Time to fit: ", fit_time)
+                print("Fit status: ", fit_result.Status())
                 # print("---------------------------------------------------------------------------")
 
                 # canvas = ROOT.TCanvas(
@@ -352,8 +399,14 @@ class Pulse:
                 # input("Enter to cont")
 
                 fitted_pulse = np.array([guo_fit([t], [fit_function.GetParameter(i) for i in range(
-                    fit_function.GetNpar())]) for t in np.linspace(rise_idx, len(self.record), len(self.record[rise_idx:]))])
+                    fit_function.GetNpar())]) for t in np.linspace(rise_idx, len(self.record), len(self.record)-rise_idx)])
 
+                print(len(self.record))
+
+                print(np.linspace(rise_idx, len(self.record),
+                      len(self.record)-rise_idx))
+                print(
+                    len(np.linspace(rise_idx, len(self.record), len(self.record)-rise_idx)))
                 # After fit subtraction, area is a good indicator of whether a bad fit has badly messed up the remaining pulse
                 corrected_pulse_area = np.sum(fitted_pulse)
 
@@ -363,10 +416,12 @@ class Pulse:
                 # if corrected_pulse_area < -1000:
                 #     print("Bad fit, remaining pulse mangled")
 
-                # Get the timestamp, will be relative to the timestamp of the event at trigger point (first peak rise)
+                # Get the timestamp, will be relative to the timestamp of the event at trigger point (first peak rise) in nanosecs
                 self.true_timestamps.append(
                     self.timestamp + (rise_idx - self.rise_indices[0])*8)
                 self.areas.append(np.sum(fitted_pulse))
+                print("FIT AREA : ", np.sum(fitted_pulse))
+
                 self.chi2.append(fit_function.GetChisquare())
                 self.ndf.append(fit_function.GetNDF())
 
@@ -378,25 +433,29 @@ class Pulse:
                 self.par2.append(fit_function.GetParameter(2))
                 self.par3.append(fit_function.GetParameter(3))
 
+                # Allow for potential cutting of waveforms near the end of the pulse - bad fits?
+                self.rise_point.append(rise_idx)
+
                 self.record_id.append(self.event_id)
 
                 self.time_to_fit.append(fit_time)
 
+                # plt.close()
+
+                # plt.plot(self.record, label='Original Pulse')
+
                 # Correct wfm
                 self.record[rise_idx:] = self.record[rise_idx:] - fitted_pulse
 
-                # print("Parent waveform: ", self.event_id)
                 # print("Pulses in record: ", len(self.rise_indices))
                 # print("Timestamps: ", self.true_timestamps)
 
-                plt.close()
+                # plt.plot(fitted_pulse, label='Fitted pulse')
+                # plt.plot(self.record[rise_idx:],
+                #          label='Waveform minus Fitted Pulse')
 
-                plt.plot(fitted_pulse, label='Fitted pulse')
-                plt.plot(self.record[rise_idx:],
-                         label='Waveform minus Fitted Pulse')
-
-                plt.legend()
-                plt.show()
+                # plt.legend()
+                # plt.show()
 
                 del fitted_pulse
                 del fit_function
