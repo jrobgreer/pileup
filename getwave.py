@@ -5,8 +5,11 @@ import numpy as np
 # file = 'testdataGENERATOR.dat'
 # perc_of_events
 
+# TODO improve this, it's not necessary for multiprocessed code to load in ALL the data, only that which it will index
+
 
 def get_pulse_collection(file, baseline, digitizer_family=gdw.DigitizerFamily.X725):
+
     parser = gdw.Parser(file, digitizer_family=digitizer_family)
     print(parser.n_entries)
 

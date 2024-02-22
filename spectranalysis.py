@@ -117,8 +117,8 @@ class Pulse:
             print("Encroaching previous pulse, skip to next...")
             return
 
-        plt.close()
-        plt.plot(self.record, label='Original wfm')
+        # plt.close()
+        # plt.plot(self.record, label='Original wfm')
         # plt.show()
 
         def moving_average(a, n=moving_av_filt):
@@ -139,9 +139,9 @@ class Pulse:
             threshold_idx = np.argmax(self.record[:first_neg_grad])
             print(threshold_idx)
             self.record[:threshold_idx] = 0
-            plt.plot(self.record, label='Shoulder removed')
-            plt.legend()
-            plt.show()
+            # plt.plot(self.record, label='Shoulder removed')
+            # plt.legend()
+            # plt.show()
             # self.record[:first_neg_grad] = 0
 
         except ValueError:
